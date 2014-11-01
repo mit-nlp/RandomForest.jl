@@ -1,0 +1,11 @@
+julia 0.3-
+LIBSVM
+StatsBase
+SVM
+DataStructures
+RDatasets
+DataArrays
+DataFrames
+DocOpt
+#Stage
+#Ollam
