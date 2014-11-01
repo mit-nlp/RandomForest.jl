@@ -1,7 +1,22 @@
-using RandomForest, Stage, RDatasets, DataStructures, DataArrays, DataFrames
+using RandomForest, Stage, RDatasets, DataStructures, DataArrays, DataFrames, DocOpt
 import Ollam: print_confusion_matrix, train_svm, test_classification
 import Base: length, start, done, next
 
+usage = """AutoCRT test script
+Usage:
+  autocrt.jl [options] <data>...
+
+Options:
+  --random            random split of per-level exemplars
+  --truth=I           column index of truth [default: 4]
+  --na-limit=I        maximum number of NAs to allow for a valid exemplar [default: 4]
+  --data-start=I      column index indicating the start of data [default: 6]
+  --lowest-level=I    minimum level to include for training/testing [default: 0.0]
+  --highest-level=I   maximum level to include for training/testing [default: 1.0]
+"""
+
+args = docopt(usage, ARGS, version=v"0.0.1")
+assert(length(args["<data>"]) > 0)
 # ----------------------------------------------------------------------------------------------------------------
 # Helpers
 # ----------------------------------------------------------------------------------------------------------------
@@ -17,6 +32,16 @@ eachrow(m) = EachRow(m)
 # -------------------------------------------------------------------------------------------------------------------------
 # autocrt
 # -------------------------------------------------------------------------------------------------------------------------
+if !args["--random"]
+  @info "using a fixed seed for randomization"
+  srand(0)
+end
+
+const first_datum = int(args["--data-start"])
+const truth_index = int(args["--truth"])
+const na_limit    = int(args["--na-limit"])
+const level_range = float(args["--lowest-level"]):0.5:float(args["--highest-level"])
+
 function to_ilr(i :: Real) 
   base = int(floor(i))
   if i - base > 0.35
@@ -26,26 +51,29 @@ function to_ilr(i :: Real)
   end
 end
 
-const first_datum = 6
-const truth_index = 4
-
-dlidf = readtable("/Users/swade/Desktop/autocrt-for-wade/class-DLI-R.txt", separator = '\t')
-budf  = readtable("/Users/swade/Desktop/autocrt-for-wade/class-BU-Rt.txt", separator = '\t')
-rawdf = append!(dlidf, budf)
+rawdf = nothing
+for f in args["<data>"]
+  tmp = readtable(f, separator = '\t')
+  if rawdf == nothing
+    rawdf = tmp
+  else
+    append!(rawdf, tmp)
+  end
+end
 
 # clean
 above_na_thres = trues(size(rawdf, 1))
 for i = 1:size(rawdf, 1)
   xxx = count(f -> isna(f), array(rawdf[i, :]))
-  if xxx > 4
-    @debug "Dropping subject $i ($(rawdf[i, 1])), too many nas ($xxx)"
+  if xxx > na_limit
+    @debug "Dropping subject $i ($(rawdf[i, 1])), too many nas ($xxx > $na_limit)"
     above_na_thres[i] = false
   end
 end
 
 for i = first_datum:size(rawdf, 2)
   m = mean(dropna(rawdf[i]))
-  rawdf[i] = array(rawdf[i], 0.0)
+  rawdf[i] = array(rawdf[i], 0.0) # or use m
 end
 
 for i = 1:size(rawdf, 1)
@@ -62,7 +90,7 @@ order      = shuffle([1:size(cleandf, 1)])
 crt_data   = cleandf[order, :]
 train_mask = trues(size(cleandf, 1))
 test_mask  = falses(size(cleandf, 1))
-for l in 0.0:0.5:1.0
+for l in level_range
   idxs = find(x -> x == l, crt_data[:, truth_index])
   @debug @sprintf("%3s -- %3d", l, length(idxs))
   for i = 1:(length(idxs) * 0.33)
